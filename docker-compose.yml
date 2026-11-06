@@ -1,0 +1,87 @@
+# Local production-like stack:  docker compose up --build
+#
+#   Frontend  http://localhost:3000
+#   Backend   http://localhost:8000   (Swagger: /docs, health: /api/v1/health)
+#
+# Setup: cp .env.example .env (sets BACKEND_API_ACCESS_KEY), and backend/.env for provider keys.
+#
+# Traffic: the browser only calls the frontend (same-origin /api/*). The frontend's server-side
+# proxy calls the backend over the Compose network at http://backend:8000 with a bearer token,
+# so the backend requires API_ACCESS_KEY here exactly as in production.
+# Ports are published on 127.0.0.1 only: this stack is not meant to be reachable from your network.
+# Secrets come from .env and backend/.env at runtime and are never baked into images.
+
+name: search-weather-assistant
+
+services:
+  backend:
+    build:
+      context: ./backend
+    image: search-weather-backend:local
+    env_file:
+      - path: ./backend/.env
+        required: true
+    environment:
+      PORT: "8000"
+      API_ACCESS_KEY: ${BACKEND_API_ACCESS_KEY:?Set BACKEND_API_ACCESS_KEY in .env (openssl rand -hex 32). See .env.example}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=4)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+      start_interval: 2s
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    image: search-weather-frontend:local
+    environment:
+      # Server-side only (route handlers); never exposed to the browser.
+      BACKEND_API_URL: http://backend:8000
+      BACKEND_API_ACCESS_KEY: ${BACKEND_API_ACCESS_KEY:?Set BACKEND_API_ACCESS_KEY in .env (openssl rand -hex 32). See .env.example}
+      # Access gate: on when ACCESS_CODES is set. Without codes, local runs are open
+      # (ALLOW_PUBLIC_ACCESS defaults to true here because ports are bound to 127.0.0.1).
+      ACCESS_CODES: ${ACCESS_CODES:-}
+      ACCESS_SESSION_SECRET: ${ACCESS_SESSION_SECRET:-}
+      ACCESS_SESSION_TTL_HOURS: ${ACCESS_SESSION_TTL_HOURS:-}
+      ALLOW_PUBLIC_ACCESS: ${ALLOW_PUBLIC_ACCESS:-true}
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/access').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+      start_interval: 2s
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped

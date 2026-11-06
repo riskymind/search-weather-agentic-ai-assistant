@@ -1,0 +1,16 @@
+# Secrets / local env
+.env
+.env.*
+!.env.example
+
+# Dependencies and build output are produced inside the image
+node_modules/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+
+# Not needed in the image
+Dockerfile
+.dockerignore
+README.md

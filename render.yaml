@@ -1,0 +1,41 @@
+# Render Blueprint for the backend (optional: the dashboard steps in docs/DEPLOYMENT.md
+# configure the same thing by hand). Secrets use `sync: false`, so Render prompts for them;
+# they are never stored in this file.
+services:
+  - type: web
+    name: search-weather-backend
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /api/v1/health
+    autoDeploy: false
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: WEATHER_API_KEY
+        sync: false
+      # Exact Vercel origin(s), e.g. https://search-weather.vercel.app
+      - key: FRONTEND_URL
+        sync: false
+      # Shared with the frontend proxy (Vercel BACKEND_API_ACCESS_KEY). Required in production.
+      - key: API_ACCESS_KEY
+        sync: false
+      - key: APP_ENV
+        value: production
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: LOG_LEVEL
+        value: INFO
+      # Render sits behind Cloudflare. CF-Connecting-IP is set by Cloudflare on every plan
+      # (True-Client-IP is Enterprise-only). Honoured only for peers on Render's private network
+      # (TRUSTED_PROXY_CIDRS default). UNVERIFIED until checked with CLIENT_IP_DIAGNOSTICS on the
+      # deployed service: see docs/DEPLOYMENT.md, "Client IP".
+      - key: CLIENT_IP_HEADER
+        value: CF-Connecting-IP
+      # Turn on only while verifying the client-IP setup, then turn off again.
+      - key: CLIENT_IP_DIAGNOSTICS
+        value: "false"

@@ -1,0 +1,21 @@
+# Secrets: never send to the build context.
+.env
+.env.*
+!.env.example
+
+# Local environments, caches and artefacts
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Not needed in the image
+tests/
+Dockerfile
+.dockerignore
