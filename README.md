@@ -206,7 +206,9 @@ Latest results are recorded in [spec.md](spec.md#15-final-verification-2026-11-0
 - **Backend → Render** (Docker, root directory `backend`, health check `/api/v1/health`, `render.yaml` Blueprint available).
 - **Frontend → Vercel** (root directory `frontend`, server-only environment variables).
 
-Step-by-step instructions, the client-IP verification procedure and gate operations are in **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**. Nothing has been deployed yet.
+Step-by-step instructions, the client-IP verification procedure and gate operations are in **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
+
+**Live (deployed 2026-11-07):** https://search-weather-agent.vercel.app. It requires an access code; ask the owner. The backend at https://search-weather-backend.onrender.com accepts agent requests only from the frontend proxy. The deployment record and verification results are in [docs/DEPLOYMENT.md §7](docs/DEPLOYMENT.md#7-deployment-record-2026-11-07).
 
 ## Security considerations
 
@@ -223,11 +225,10 @@ Step-by-step instructions, the client-IP verification procedure and gate operati
 
 - **In-memory state.** Sessions and rate limits live in one backend process, which must run as a single instance. Restarts (including Render free-tier sleep) clear them. Conversation history is stored per browser only.
 - **Access-attempt limiting is per server instance.** It is exact in Docker, best effort on Vercel; strong codes are the real protection.
-- **Render client-IP header is unverified** until checked on a deployed service ([procedure](docs/DEPLOYMENT.md#32-client-ip-on-render)).
+- **Stream cancellation through Vercel.** When a browser abandons a streamed answer on the deployed site, the backend still finishes that turn (it is cancelled correctly in Docker and on direct requests). Cost is bounded by the 60 s turn limit and rate limiting; see [docs/DEPLOYMENT.md §7](docs/DEPLOYMENT.md#7-deployment-record-2026-11-07).
 - **Self-hosted frontends** (outside Vercel) have no trustworthy end-user IP, so the backend rate-limits proxied traffic as one client there.
 - **Provider reliability.** Weatherstack calls occasionally failed during testing (a connection error, a timeout and an HTTP error in about a dozen calls). The tool reports these honestly but does not retry.
 - **Free-tier cold starts** on Render can delay the first request by about a minute.
-- **Not deployed.** Deployment steps are documented but have not been run.
 
 ## Research notebook and legacy app
 

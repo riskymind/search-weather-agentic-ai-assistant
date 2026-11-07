@@ -2,7 +2,11 @@
 
 How to run the stack in Docker, deploy the backend to Render and the frontend to Vercel, and operate the access gate.
 
-> **Status:** deployment configuration is prepared and verified locally in Docker (both images, Compose, real provider calls, a headless-Chrome run through the proxy and gate). **Nothing has been deployed.** The Render client-IP configuration in particular is **unverified** until checked against the deployed service (§3.2).
+> **Status (2026-11-07): deployed and verified with production requests.**
+> - Backend: https://search-weather-backend.onrender.com (Render free plan, 1 instance)
+> - Frontend: https://search-weather-agent.vercel.app (Vercel Hobby, behind the access gate)
+>
+> The Render client-IP configuration (§3.2) and the forwarded end-user IP through the Vercel proxy are **verified**. Results and open issues are in §7 and `spec.md` §16.
 
 ## 1. Architecture and URLs
 
@@ -96,7 +100,13 @@ Rate limiting needs the caller's IP. Requests reach a Render web service through
 
 Tested locally (`backend/tests`): spoofed `CF-Connecting-IP`, `True-Client-IP`, `X-Forwarded-For` and `X-Client-IP` from an untrusted peer or without the key do not change the rate-limit identity.
 
-**Not yet verified against Render.** After deploying:
+**Verified against the deployed Render service on 2026-11-07** (full results in `spec.md` §16.2):
+- `peer_trusted: true`, and `cf-connecting-ip` and `network_client_ip` equal the caller's real IP.
+- A client-supplied `CF-Connecting-IP` is **rejected by Cloudflare with HTTP 403 (error 1000)** before it reaches the service. A client-supplied `True-Client-IP` is overwritten, `X-Real-IP` is stripped, and `X-Forwarded-For` keeps the spoofed prefix, which is why it is not used.
+- Through the Vercel proxy, rate limiting was keyed on the visitor's real public IP, and spoofed headers sent to Vercel did not change it.
+- Diagnostics were then disabled again (404 with a valid key).
+
+Only IPv4 was tested. Repeat the procedure below after changes to Render, Cloudflare or the proxy:
 
 1. Set `CLIENT_IP_DIAGNOSTICS=true` on the Render service and redeploy. The endpoint returns 404 unless this is on **and** `API_ACCESS_KEY` is set, and it always requires the key.
 2. From your machine (`KEY` = the backend `API_ACCESS_KEY`):
@@ -145,6 +155,8 @@ Outside Vercel the frontend has no trustworthy end-user IP, so it sends no `X-Cl
    | `ACCESS_SESSION_TTL_HOURS` | optional, default `168` |
 
    Without `ACCESS_CODES` (and without `ALLOW_PUBLIC_ACCESS=true`), the production app **refuses every request** with `503 access_not_configured`. It fails closed.
+
+   Create the three secrets with **Sensitive** enabled, so they cannot be read back in the dashboard. Check the names before the first deploy. A typo (for example `ACCESS_CODE`) does not fail the build: it makes the app refuse every request (503) or makes the backend reject the proxy (401).
 4. Deploy. Then set the backend's `FRONTEND_URL` to the production origin and redeploy the backend.
 5. Verify:
    - Visiting the site redirects to `/access`.
@@ -199,9 +211,40 @@ For a portfolio demo shared with several reviewers who don't have Vercel account
 
 ## 6. Post-deployment checklist
 
-- [ ] `GET <render>/api/v1/health` is 200 with `"environment":"production"`; a direct `POST <render>/api/v1/agent/query` is 401.
-- [ ] Client IP verified with the diagnostics endpoint (§3.2), then diagnostics turned off.
-- [ ] `<vercel>/` redirects to `/access`; `<vercel>/api/health` is 401 without a cookie.
-- [ ] A code signs in; a suggested prompt streams with tool activity, a weather card and sources.
-- [ ] DevTools: requests only to the Vercel origin, no `Authorization` header, cookie `HttpOnly; Secure; SameSite=Lax`.
-- [ ] Removing a code from `ACCESS_CODES` and redeploying signs that person out.
+Status from the 2026-11-07 deployment. `[x]` means verified with production requests.
+
+- [x] `GET <render>/api/v1/health` is 200 with `"environment":"production"`; a direct `POST <render>/api/v1/agent/query` is 401.
+- [x] Client IP verified with the diagnostics endpoint (§3.2), then diagnostics turned off.
+- [x] `<vercel>/` redirects to `/access`; `<vercel>/api/health` is 401 without a cookie.
+- [x] A code signs in; a multi-tool prompt streams tool activity and the answer (verified at the protocol level with curl).
+- [ ] The weather card and sources render in a real browser on production. Not yet confirmed by a person (verified in headless Chrome against Docker).
+- [x] Cookie `HttpOnly; Secure; SameSite=Lax`.
+- [ ] DevTools: requests only to the Vercel origin, no `Authorization` header. Not yet confirmed by a person on production; the client-asset scan found no backend URL or secret.
+- [x] Removing a code from `ACCESS_CODES` and redeploying signs that person out.
+- [x] Rotating `ACCESS_SESSION_SECRET` and redeploying signs everyone out.
+- [x] 5 failed codes lock further attempts (per Vercel instance).
+- [x] Rate limiting is keyed on the visitor's real IP through the proxy, and spoofed headers don't change it.
+- [ ] A browser closing a stream cancels the backend turn. **Fails on Vercel** (§7).
+
+## 7. Deployment record (2026-11-07)
+
+| | |
+|---|---|
+| Commit | `2c28726` (`main`, merge of PR #1) |
+| Render | `search-weather-backend` (`srv-dbn6c6l6e07s73dp11v0`), created from `render.yaml`, free plan, 1 instance, Oregon |
+| Vercel | `search-weather-agent` (`prj_fz6m6kC4rxGefIlkluMd29ZcOkTU`), root `frontend`, Node 24.x, connected to GitHub (pushes to `main` deploy production) |
+| Backend env (non-secret) | `APP_ENV=production`, `FRONTEND_URL=https://search-weather-agent.vercel.app`, `CLIENT_IP_HEADER=CF-Connecting-IP`, `CLIENT_IP_DIAGNOSTICS=false`, `OPENAI_MODEL=gpt-4o-mini`, `LOG_LEVEL=INFO`, `RATE_LIMIT_REQUESTS=20`, `RATE_LIMIT_WINDOW_SECONDS=60` |
+| Frontend env (non-secret) | `BACKEND_API_URL=https://search-weather-backend.onrender.com` |
+| Secrets (set in each dashboard by the owner) | Render: `OPENAI_API_KEY`, `TAVILY_API_KEY`, `WEATHER_API_KEY`, `API_ACCESS_KEY`. Vercel: `BACKEND_API_ACCESS_KEY`, `ACCESS_CODES`, `ACCESS_SESSION_SECRET` |
+| Never set | `ALLOW_PUBLIC_AGENT_API`, `ALLOW_PUBLIC_ACCESS`, `NEXT_PUBLIC_*` |
+
+**Open issues (details in `spec.md` §16.4):**
+1. **Cancellation does not propagate through the Vercel proxy.** A stream the browser abandons still runs on the backend until the turn completes. Direct aborts to Render are cancelled within about 1 s, and Docker behaved correctly. This wastes provider spend, bounded by the 60 s turn cap and the rate limit.
+2. **One intermittent SSE stall** on the first cold-start stream: it stopped after `tool_start` and stayed open past `maxDuration`. It was not reproduced in four later runs.
+3. **Secrets are stored as Encrypted, not Sensitive**, in Vercel. Recreate them as Sensitive.
+4. **Render auto-deploy is off** (`render.yaml`), and Vercel deploys on every push to `main`. Deploy backend changes by hand first.
+
+**Operational notes:**
+- Vercel applies changed variables only to new deployments. Redeploy from the dashboard, or with a Git push.
+- Render's free plan sleeps when idle, and the first request after a pause can take about a minute.
+- Restarts clear in-memory sessions and rate-limit counters.

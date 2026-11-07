@@ -1,6 +1,6 @@
 # Engineering report: Search + Weather Agentic AI Assistant
 
-**Date:** 2026-11-04 · **Base commit:** `be395ca` (`main`) · **State:** all milestones implemented and verified locally; **nothing committed, pushed or deployed**.
+**Date:** 2026-11-04, deployment addendum 2026-11-07 · **Base commit:** `be395ca` (`main`) · **State:** all milestones implemented and verified locally (2026-11-04), merged as PR #1 (`2c28726`), and **deployed to Render and Vercel on 2026-11-07** (§12).
 
 ## 1. Original architecture
 
@@ -135,7 +135,9 @@ Two test-quality issues were found and fixed:
 
 ## 10. Remaining limitations
 
-- **Not deployed.** The Render client-IP header (`CF-Connecting-IP`) is **unverified** until checked with the diagnostics endpoint on a deployed service (DEPLOYMENT.md §3.2).
+- **Deployed on 2026-11-07** (§12). The Render client-IP header (`CF-Connecting-IP`) and the forwarded end-user IP through the Vercel proxy are verified on production.
+- **Cancellation through Vercel (found in production):** a stream abandoned by the browser keeps running on the backend until the turn completes (it worked in Docker). Spend is bounded by the 60 s turn cap and the rate limit. A fix is recommended in `spec.md` §16.4.
+- **One intermittent SSE stall** was observed on Vercel (cold start) and not reproduced.
 - **In-memory sessions and rate limits:** single backend instance; reset on restart or Render sleep. Browser-only history.
 - **Access-attempt limiting:** per server instance, so best effort on Vercel; strong codes are the primary control.
 - **Self-hosted frontend (non-Vercel):** no trustworthy end-user IP, so proxied traffic shares one backend rate-limit bucket.
@@ -160,3 +162,18 @@ Full detail is in `docs/DEPLOYMENT.md`.
    - Set the backend `FRONTEND_URL` to the final Vercel origin and redeploy the backend.
    - Run the post-deployment checklist (DEPLOYMENT.md §6): gate redirect, 401 without a cookie, sign-in, streaming answer, DevTools shows only same-origin requests without `Authorization`, and revocation works.
 6. **Cost controls:** set an OpenAI budget cap and alerts, and choose provider plans that stop instead of bill overage.
+
+## 12. Production deployment (M12, 2026-11-07)
+
+**URLs:** backend https://search-weather-backend.onrender.com (Render free plan, 1 instance); frontend https://search-weather-agent.vercel.app (Vercel Hobby, access gate). Deployed from `2c28726` with no code changes. Secrets were entered by the owner in each provider's dashboard and never appeared in output or documents. The full evidence is in `spec.md` §16 and `docs/DEPLOYMENT.md` §7.
+
+**How each result was established:**
+
+| Level | What |
+|---|---|
+| Verified locally (Docker, 2026-11-04) | Everything in §7–§9, including the browser network audit in headless Chrome, and disconnect cancellation |
+| Deployed | Both services live; Render startup shows production, API-key auth, one process, and the exact Vercel CORS origin |
+| Verified with production requests | Backend health; 401 for missing, wrong and malformed keys; 422 validation; CORS allow and deny; diagnostics off. Render edge headers (Cloudflare rejects a client `CF-Connecting-IP` with 403; `True-Client-IP` overwritten; `X-Forwarded-For` client-appendable, unused). Rate limiting through the proxy keyed on the visitor's real IP, with 7 spoofed headers ignored. Gate on pages and APIs; login, logout and cookie flags; CSRF and open-redirect guards; revocation of one code; session-secret rotation; lockout. JSON and SSE through the proxy with real OpenAI, Tavily and Weatherstack calls; progressive delivery. No secrets or backend URL in client assets |
+| **Failed in production** | Browser cancellation through Vercel: the backend turn keeps running (direct aborts to Render are cancelled) |
+| Observed once, not reproduced | An SSE stream that stalled after `tool_start` on a cold start |
+| Not verified | Browser DevTools and UI rendering on production by a person; a second real visitor on another network; IPv6 clients |

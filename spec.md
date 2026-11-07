@@ -2,7 +2,7 @@
 
 Refactoring and deployment plan. CLAUDE.md is the requirements source; this file is the audit, the design that meets those requirements, and the progress tracker.
 
-**Status:** All milestones complete, including the secure Next.js proxy, the access gate and the final documentation (M11, 2026-11-04). Ready for deployment, pending owner approval. **Not deployed.** The Render client-IP header is unverified until checked on the deployed service (§15).
+**Status:** Deployed (M12, 2026-11-07) from commit `2c28726`. Backend: https://search-weather-backend.onrender.com (Render, free plan, 1 instance). Frontend: https://search-weather-agent.vercel.app (Vercel Hobby, behind the access gate). Client-IP handling on Render and through the Vercel proxy is **verified against production** (§16). Two deployed-only defects are open: browser cancellation does not propagate through the Vercel proxy, and one intermittent SSE stall was observed (§16.4).
 **Audit date:** 2026-11-03 · **Audited commit:** `be395ca` (`main`)
 
 ---
@@ -493,7 +493,8 @@ Deployment will **not** be performed or claimed without explicit authorization. 
 | 8 | Frontend tests + build | Vitest green, `tsc`/ESLint clean, `next build` passes; legacy-file removal **deferred** until the owner confirms parity | ✅ 2026-11-04: 60 passed; lint/tsc clean; build OK. `app.py` and `requirements.txt` are still present by instruction |
 | 9 | Docker + Compose | Both Dockerfiles; `docker compose up --build` healthy; curl checks pass | ✅ 2026-11-04: both images build; `docker compose up --build` reaches healthy/healthy; health, docs, CORS, headers and hardening verified; **real OpenAI, Tavily and Weatherstack (HTTPS) calls succeeded through the containers**, including multi-tool SSE and a headless-Chrome run |
 | 10 | Deployment config + docs | `render.yaml`, README rewrite, backend/frontend READMEs, `.gitignore` hardening, final engineering report | ✅ 2026-11-04: root README rewritten (with screenshots), DEPLOYMENT.md rewritten, final report in `docs/ENGINEERING_REPORT.md` |
-| 11 | Secure proxy + access gate + client-IP review | Same-origin route handlers with server-side bearer key, unbuffered SSE proxy, access gate, `CF-Connecting-IP` + keyed `X-Client-IP`, diagnostics endpoint; tests; Docker and browser verification | ✅ 2026-11-04: backend 179 passed (99%); frontend 132 passed; lint/tsc/build clean; Docker E2E and 13/13 headless-Chrome checks with real providers. Render client IP **unverified** (needs deployment) |
+| 11 | Secure proxy + access gate + client-IP review | Same-origin route handlers with server-side bearer key, unbuffered SSE proxy, access gate, `CF-Connecting-IP` + keyed `X-Client-IP`, diagnostics endpoint; tests; Docker and browser verification | ✅ 2026-11-04: backend 179 passed (99%); frontend 132 passed; lint/tsc/build clean; Docker E2E and 13/13 headless-Chrome checks with real providers. Render client IP verified in M12 |
+| 12 | Controlled production deployment | Render backend, Vercel frontend, client-IP verification on the deployed path, post-deployment checklist, docs | ✅ 2026-11-07 with open issues: deployed and verified with production requests (§16). Open: cancellation through the Vercel proxy (§16.4 #1), one unreproduced SSE stall (#2). Browser DevTools check not yet confirmed by a person |
 
 After each milestone: run tests, lint and type checks, review the diff, and update this table. No commits, pushes or deploys without explicit authorization.
 
@@ -621,6 +622,7 @@ Deviations from the plan above, with reasons:
 - 2026-11-04: Backend hardening (rate limiting, session lock, body limit, config aggregation, SSE contract docs). Next.js frontend implemented, tested and verified in headless Chrome.
 - 2026-11-04: Docker images, Compose, Render Blueprint, deployment guide and security review; client-IP resolution and an optional access key with a production fail-safe.
 - 2026-11-04: M11, secure Next.js proxy (same-origin routes, server-side bearer key, unbuffered SSE pass-through), app-level access gate, `CF-Connecting-IP` + keyed `X-Client-IP`, client-IP diagnostics endpoint, root README and DEPLOYMENT.md rewritten, final engineering report. D8 superseded; D15, D16 added.
+- 2026-11-07: M12, production deployment to Render and Vercel; client IP verified on the deployed path; post-deployment checklist run (§16). No code changes.
 
 ## 15. Final verification (2026-11-04)
 
@@ -642,5 +644,76 @@ Deviations from the plan above, with reasons:
 | Access gate via Docker | anonymous page → 307 `/access`; API → 401; forged cookie → 401; login → 303 + `HttpOnly; SameSite=Lax` cookie; logout clears it; changing a code revokes its live session (200 → 401); 5 failures → `locked` with `Retry-After: 900`, even for the correct code; logs contain no codes |
 | Headless Chrome (real providers) | 13/13 checks: redirect to gate, wrong code rejected, cookie not readable by JS, sign-in, streaming, weather card, 3 sources with `noopener noreferrer`, mobile dark weather card, **no request off-origin, none with `Authorization`, none to :8000** |
 | Spoofed client-IP headers (tests) | `CF-Connecting-IP`, `True-Client-IP`, `X-Forwarded-For` from untrusted peers and `X-Client-IP` without the key do not change the rate-limit identity |
-| Render client-IP behaviour | **Not verified**: needs a deployed service (procedure in DEPLOYMENT.md §3.2) |
-| Deployment | **Not performed** (not authorised) |
+| Render client-IP behaviour | Not verified on 2026-11-04 (no deployed service). **Verified on 2026-11-07**, see §16.2 |
+| Deployment | Not performed on 2026-11-04. **Performed on 2026-11-07**, see §16 |
+
+## 16. Production deployment (M12, 2026-11-07)
+
+Deployed from `main` at commit `2c28726` (the merge of PR #1). **No application code was changed and nothing was committed during deployment.** Secrets were generated locally, kept in a private file outside the repository, and entered by the owner in each provider's dashboard. They never appeared in terminal output, tool calls, logs or these documents.
+
+### 16.1 Services and configuration
+
+| | Backend | Frontend |
+|---|---|---|
+| URL | https://search-weather-backend.onrender.com | https://search-weather-agent.vercel.app |
+| Platform | Render, Blueprint `render.yaml`, Docker, **free plan, 1 instance**, Oregon, auto-deploy off | Vercel Hobby, project `search-weather-agent`, root `frontend`, Next.js, **Node 24.x**, region iad1 |
+| Service ID | `srv-dbn6c6l6e07s73dp11v0` | `prj_fz6m6kC4rxGefIlkluMd29ZcOkTU` (deployment `dpl_92GqcYagmLQTvmwTwDFf7fhuBNpB`) |
+| Secrets (names only) | `OPENAI_API_KEY`, `TAVILY_API_KEY`, `WEATHER_API_KEY`, `API_ACCESS_KEY` | `BACKEND_API_ACCESS_KEY` (= `API_ACCESS_KEY`), `ACCESS_CODES`, `ACCESS_SESSION_SECRET` |
+| Other settings | `APP_ENV=production`, `FRONTEND_URL=https://search-weather-agent.vercel.app`, `CLIENT_IP_HEADER=CF-Connecting-IP`, `CLIENT_IP_DIAGNOSTICS=false`, `OPENAI_MODEL=gpt-4o-mini`, `LOG_LEVEL=INFO`, `RATE_LIMIT_REQUESTS=20`, `RATE_LIMIT_WINDOW_SECONDS=60` (the last two set explicitly to their defaults after the test in §16.2) | `BACKEND_API_URL=https://search-weather-backend.onrender.com` |
+| Not set (by design) | `ALLOW_PUBLIC_AGENT_API`, `PORT` | `ALLOW_PUBLIC_ACCESS`, any `NEXT_PUBLIC_*` |
+
+The startup log confirms: `environment: production`, `agent_auth: api_key`, `cors_origins: [https://search-weather-agent.vercel.app]`, `client_ip_header: cf-connecting-ip`, and one uvicorn process. Vercel's default Standard Protection stays on: deployment-specific and branch URLs require a Vercel login (302 to `vercel.com/sso-api`), while the production domain is protected by the app's access gate.
+
+### 16.2 Client IP (DEPLOYMENT.md §3.2), with production requests
+
+**Render edge, using the diagnostics endpoint (enabled temporarily, then disabled and confirmed 404 even with the key):**
+
+| Request | Observed |
+|---|---|
+| Baseline | `peer` 127.0.0.1, `peer_trusted: true`; `cf-connecting-ip` = `network_client_ip` = the caller's real IP |
+| Client sends `CF-Connecting-IP` | **Rejected by Cloudflare at the edge: HTTP 403, "error code: 1000"**. The request never reaches the service |
+| Client sends `True-Client-IP` | Overwritten with the real IP |
+| Client sends `X-Forwarded-For` | Arrives as `<spoofed>,<real>, <cloudflare>, <render>`: client-appendable, so correctly unused. Identity unchanged |
+| Client sends `X-Real-IP` | Stripped |
+| `X-Client-IP` with a valid key | Used as the rate-limit key (`rate_limit_key` = the header value) |
+| `X-Client-IP` with no key or a wrong key | 401 |
+
+Conclusion: `CLIENT_IP_HEADER=CF-Connecting-IP` with the default `TRUSTED_PROXY_CIDRS` is correct on Render. Only IPv4 was tested; the test client had no IPv6.
+
+**End to end through the Vercel proxy (`RATE_LIMIT_REQUESTS=3` / 300 s temporarily, restored afterwards):**
+1. Three proxied queries → 200, the fourth → **429** with `Retry-After`.
+2. While limited, proxied requests with spoofed `X-Forwarded-For`, `X-Vercel-Forwarded-For`, `X-Real-IP`, `X-Client-IP`, `True-Client-IP` and `CF-Connecting-IP` → all **429** (same identity). A second signed-in session from the same IP → 429 (limits are per IP, not per session).
+3. **Decisive check:** a direct, keyed backend request with `X-Client-IP` set to the tester's real public IP → **429**. So the proxy's bucket is exactly the visitor's real IP, which Vercel supplied, the proxy forwarded as `X-Client-IP`, and the backend honoured because the key was valid.
+4. A keyed request with a different `X-Client-IP` → 200 (separate bucket). A real second visitor on another network through the proxy has **not** been tested.
+
+### 16.3 Post-deployment checklist (DEPLOYMENT.md §6)
+
+| Check | Result |
+|---|---|
+| Backend health | 200, `"environment":"production"` |
+| Backend agent routes without a key, with a wrong key, or with a non-Bearer header | 401 (`query` and `stream`) |
+| Valid key, invalid payload | 422 |
+| CORS | allowed for the Vercel origin; `400 Disallowed CORS origin` for others |
+| Diagnostics | off: 404 with a valid key |
+| Gate: pages | `/` → 307 `/access`; unknown paths → 307 `/access?next=…` |
+| Gate: API | `/api/health`, `/api/agent/query`, `/api/agent/stream` → 401 `access_required` without a cookie or with a forged one |
+| Login | 303 → `/`; cookie `sw_access`, `HttpOnly; Secure; SameSite=Lax; Max-Age=604800` |
+| Logout | 303 → `/access?signed_out=1`, cookie cleared (`Max-Age=0`), API → 401 afterwards |
+| CSRF | cross-site logout → 403; cross-site login → `/access?error=origin`, no cookie set |
+| Open redirect | `next=//evil.example` → `Location: /` |
+| Revocation of one code | removed `reviewer-a` and redeployed: reviewer session → 401 and page → `/access`; owner session still 200; the revoked code is rejected at login |
+| Session-secret rotation | rotated and redeployed: the existing owner session → 401; re-login → 200 |
+| Login lockout | 5 wrong codes → the correct code is refused (`error=locked`, `Retry-After: 893`); existing sessions unaffected. Per Vercel instance (best effort, as documented) |
+| Query through the proxy | 200 (`"OK"`, no tools), which also confirms `BACKEND_API_ACCESS_KEY` = `API_ACCESS_KEY` |
+| SSE through the proxy, real providers | Kenya: `tavily_search` → `weather` → answer, progressive (tool events at 2.9–4.5 s, tokens 5.4–8.1 s, `done` and close at 8.1 s). Lagos weather ×3: progressive, `done` at 5.7–7.9 s |
+| Rate limiting | see §16.2 |
+| Secrets in client assets | the 9 JS/CSS assets (630 KB) the pages reference contain no secret value, no `onrender.com`, no `Bearer`, no `NEXT_PUBLIC` |
+| Secrets in logs | Render startup and request logs and Vercel runtime logs contain no secret or code (gate logs record the label only) |
+| Browser DevTools (same-origin only, no `Authorization`) and UI rendering (weather card, sources) on production | **Not yet confirmed by a person.** Verified in headless Chrome against Docker in M11 (§15) |
+
+### 16.4 Open issues found in production
+
+1. **Browser cancellation does not reach the backend through Vercel.** Aborting a stream directly against Render → the backend logs `stream_client_disconnected` within about 1 s and the turn stops. Aborting the same request through `https://search-weather-agent.vercel.app/api/agent/stream` → the turn runs to completion (`agent_turn_completed`, 15 s, provider calls made). This worked in Docker (§15), so it is specific to the Vercel runtime: the route handler's `request.signal` and the response stream's `cancel()` do not appear to fire when the client disconnects. **Impact:** wasted provider spend, bounded by the 60 s turn cap and the rate limit. It is not a security issue. **Recommended correction (not implemented):** reproduce in a Vercel preview with logging on `request.signal` abort and `ReadableStream.cancel`. If neither fires, have the proxy stop forwarding and cancel the upstream when an enqueue fails or the platform signals the disconnect, then re-verify against the backend log.
+2. **One SSE stall, not reproduced.** The first streamed request after the first deploy (cold start) delivered `session`, `status` and `tool_start`, then nothing more. The connection stayed open well past `maxDuration = 120` until the client was killed at about 225 s, although the backend finished in 8.3 s. Four later streams were fine. It is recorded as intermittent; watch Vercel runtime logs for `stream_interrupted` and long `/api/agent/stream` durations.
+3. **Vercel secrets are "Encrypted", not "Sensitive"**, so project members can read them in the dashboard (Vercel flags `readable-secret`). Recreating them as Sensitive is recommended.
+4. **Render deploys are manual** (`autoDeploy: false` in `render.yaml`), and the Vercel project deploys on every push to `main`. A frontend change that needs a backend change must be deployed to Render by hand first.
